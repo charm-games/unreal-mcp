@@ -68,7 +68,9 @@ def register_editor_tools(mcp: FastMCP):
             
             if not response:
                 return []
-                
+
+            if "result" in response and "actors" in response["result"]:
+                return response["result"]["actors"]
             return response.get("actors", [])
             
         except Exception as e:
@@ -363,6 +365,45 @@ def register_editor_tools(mcp: FastMCP):
             
         except Exception as e:
             error_msg = f"Error spawning blueprint actor: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def execute_console_command(
+        ctx: Context,
+        command: str
+    ) -> Dict[str, Any]:
+        """
+        Execute a console command in the Unreal Editor.
+
+        Args:
+            command: The console command to execute (e.g., "LiveCoding.Compile")
+
+        Returns:
+            Dict containing response from Unreal with operation status
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            logger.info(f"Executing console command: {command}")
+            response = unreal.send_command("execute_console_command", {
+                "command": command
+            })
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Console command response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error executing console command: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 

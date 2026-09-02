@@ -56,11 +56,16 @@ def register_blueprint_tools(mcp: FastMCP):
         location: List[float] = [],
         rotation: List[float] = [],
         scale: List[float] = [],
+        parent_component: str = None,
         component_properties: Dict[str, Any] = {}
     ) -> Dict[str, Any]:
         """
         Add a component to a Blueprint.
-        
+
+        Each call compiles the blueprint after adding the component.
+        When adding multiple components, call this once per component.
+        Property changes via set_component_property can be batched freely.
+
         Args:
             blueprint_name: Name of the target Blueprint
             component_type: Type of component to add (use component class name without U prefix)
@@ -68,8 +73,10 @@ def register_blueprint_tools(mcp: FastMCP):
             location: [X, Y, Z] coordinates for component's position
             rotation: [Pitch, Yaw, Roll] values for component's rotation
             scale: [X, Y, Z] values for component's scale
+            parent_component: Name of the parent component to attach to (from get_blueprint_components)
+            skip_compile: If True, skip blueprint compilation (use when batching multiple additions)
             component_properties: Additional properties to set on the component
-        
+
         Returns:
             Information about the added component
         """
@@ -86,6 +93,10 @@ def register_blueprint_tools(mcp: FastMCP):
                 "scale": scale or [1.0, 1.0, 1.0]
             }
             
+            # Add parent component if specified
+            if parent_component:
+                params["parent_component"] = parent_component
+
             # Add component_properties if provided
             if component_properties and len(component_properties) > 0:
                 params["component_properties"] = component_properties
@@ -417,4 +428,700 @@ def register_blueprint_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
     
-    logger.info("Blueprint tools registered successfully") 
+    @mcp.tool()
+    def get_blueprint_variables(
+        ctx: Context,
+        blueprint_name: str
+    ) -> Dict[str, Any]:
+        """
+        Get all variables defined in a Blueprint.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint (e.g., "/Game/Hallucination/Puzzles/BPC_PressAndHoldInteraction")
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - count: Number of variables
+            - variables: Array of variable info objects with:
+              - name: Variable name
+              - type: Human-readable type name
+              - category: Variable category
+              - pin_category: Raw pin category
+              - pin_subcategory_object: Path to subcategory object if applicable
+              - is_exposed: Whether exposed to editor
+              - is_read_only: Whether read-only
+              - is_instance_editable: Whether editable per instance
+              - default_value: Default value if set
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name
+            }
+
+            logger.info(f"Getting blueprint variables for: {blueprint_name}")
+            response = unreal.send_command("get_blueprint_variables", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get blueprint variables response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting blueprint variables: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def reparent_blueprint(
+        ctx: Context,
+        blueprint_name: str,
+        new_parent_class: str
+    ) -> Dict[str, Any]:
+        """
+        Reparent a Blueprint to a new parent class.
+
+        WARNING: This operation can cause data loss if the new parent class
+        doesn't have matching properties. Variables and functions that don't
+        exist in the new parent will be removed.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint (e.g., "/Game/Hallucination/Puzzles/BPC_PressAndHoldInteraction")
+            new_parent_class: The new parent class. Can be:
+                - Full path: "/Script/Hallucination.HALPuzzleInteractionBehaviorComponent"
+                - Class name: "HALPuzzleInteractionBehaviorComponent"
+                - Class name with prefix: "UHALPuzzleInteractionBehaviorComponent"
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - old_parent: Previous parent class name
+            - new_parent: New parent class name
+            - success: Whether the operation succeeded
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name,
+                "new_parent_class": new_parent_class
+            }
+
+            logger.info(f"Reparenting blueprint {blueprint_name} to {new_parent_class}")
+            response = unreal.send_command("reparent_blueprint", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Reparent blueprint response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error reparenting blueprint: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def get_blueprint_components(
+        ctx: Context,
+        blueprint_name: str
+    ) -> Dict[str, Any]:
+        """
+        Get all components defined in a Blueprint.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint (e.g., "/Game/Hallucination/Player/Interaction/BP_HAL_InteractionTarget")
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - parent_class: Parent class of the blueprint
+            - count: Number of components
+            - components: Array of component info objects with:
+              - name: Component variable name
+              - class: Component class name
+              - class_path: Full path to component class
+              - parent: Parent component name (if any)
+              - location: [X, Y, Z] relative location (for scene components)
+              - rotation: [Pitch, Yaw, Roll] relative rotation (for scene components)
+              - scale: [X, Y, Z] relative scale (for scene components)
+              - visible: Whether the component is visible (for scene components)
+              - child_actor_class: Actor class name (for ChildActorComponents only)
+              - child_actor_class_path: Full path to actor class (for ChildActorComponents only)
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name
+            }
+
+            logger.info(f"Getting blueprint components for: {blueprint_name}")
+            response = unreal.send_command("get_blueprint_components", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get blueprint components response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting blueprint components: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_component_parent(
+        ctx: Context,
+        blueprint_name: str,
+        component_name: str,
+        parent_name: str
+    ) -> Dict[str, Any]:
+        """
+        Re-parent a component in a Blueprint's SCS tree.
+
+        Moves a component to be a child of a different parent component.
+        Works with parents in the same BP or inherited from parent BPs.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint
+            component_name: Name of the component to re-parent
+            parent_name: Name of the new parent component
+
+        Returns:
+            Dict with success status
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name,
+                "component_name": component_name,
+                "parent_name": parent_name
+            }
+
+            logger.info(f"Setting component parent: {blueprint_name} -> {component_name} under {parent_name}")
+            response = unreal.send_command("set_component_parent", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Set component parent response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error setting component parent: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def get_component_properties(
+        ctx: Context,
+        blueprint_name: str,
+        component_name: str
+    ) -> Dict[str, Any]:
+        """
+        Get all editable properties of a specific component in a Blueprint.
+
+        Returns all UPROPERTY values that are EditAnywhere or BlueprintVisible.
+        For ChildActorComponents, also includes the child actor template's properties
+        under a "child_actor_template" sub-object.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint
+            component_name: Name of the component variable (from get_blueprint_components)
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - component: Component name
+            - class: Component class name
+            - properties: Object with property name/value pairs
+              - For ChildActorComponents, includes "child_actor_template" with template properties
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name,
+                "component_name": component_name
+            }
+
+            logger.info(f"Getting component properties: {blueprint_name} -> {component_name}")
+            response = unreal.send_command("get_component_properties", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get component properties response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting component properties: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def get_blueprint_event_graph(
+        ctx: Context,
+        blueprint_name: str,
+        filter_node_types: List[str] = None,
+        include_connections: bool = True,
+        max_nodes: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Get all nodes in a Blueprint's event graph with optional filtering.
+
+        WARNING: For complex Blueprints (>50 nodes), use check_blueprint_complexity first
+        or use filtering parameters to reduce output size.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint (e.g., "/Game/Hallucination/Player/Interaction/BP_HAL_InteractionTarget")
+            filter_node_types: Optional list of node types to include. Supported types:
+                - "Event" or "K2Node_Event" - Event nodes
+                - "FunctionCall" or "K2Node_CallFunction" - Function call nodes
+                - "VariableGet" or "K2Node_VariableGet" - Variable get nodes
+                - "VariableSet" or "K2Node_VariableSet" - Variable set nodes
+                - "Other" - All other node types
+            include_connections: Whether to include pin connection information (default True).
+                Set to False to reduce output size significantly.
+            max_nodes: Maximum number of nodes to return (default 0 = unlimited).
+                Useful for previewing large graphs.
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - graph_name: Name of the event graph
+            - node_count: Number of nodes returned (after filtering)
+            - total_nodes: Total number of nodes in the graph (before filtering)
+            - filtered: Whether any filtering was applied
+            - nodes: Array of node info objects with:
+              - guid: Node GUID
+              - class: Node class name
+              - title: Node title
+              - pos_x: X position in graph
+              - pos_y: Y position in graph
+              - node_type: Type of node (Event, FunctionCall, VariableGet, VariableSet, Other)
+              - event_name: Event name (for Event nodes)
+              - function_name: Function name (for FunctionCall nodes)
+              - function_class: Class containing the function (for FunctionCall nodes)
+              - variable_name: Variable name (for VariableGet/Set nodes)
+              - pins: Array of pin info objects with:
+                - name: Pin name
+                - direction: Input or Output
+                - type: Pin type
+                - default_value: Default value (if any)
+                - connections: Array of connected node/pin info (only if include_connections=True)
+
+        Example usage:
+            # Get only event nodes without connections (minimal output)
+            get_blueprint_event_graph("BP_MyBlueprint",
+                                     filter_node_types=["Event"],
+                                     include_connections=False)
+
+            # Get first 10 nodes for preview
+            get_blueprint_event_graph("BP_MyBlueprint", max_nodes=10)
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name,
+                "include_connections": include_connections
+            }
+
+            if filter_node_types:
+                params["filter_node_types"] = filter_node_types
+
+            if max_nodes > 0:
+                params["max_nodes"] = max_nodes
+
+            logger.info(f"Getting blueprint event graph for: {blueprint_name} with params: {params}")
+            response = unreal.send_command("get_blueprint_event_graph", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get blueprint event graph response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting blueprint event graph: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def check_blueprint_complexity(
+        ctx: Context,
+        blueprint_name: str
+    ) -> Dict[str, Any]:
+        """
+        Check the complexity of a Blueprint before fetching full details.
+
+        This tool provides a size estimate and recommendation for how to best
+        retrieve Blueprint data without overwhelming the context window.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint
+
+        Returns:
+            Dict containing:
+            - status: Complexity level (small, medium, large, very_large)
+            - node_count: Number of nodes in the event graph
+            - connection_count: Number of pin connections
+            - execution_path_count: Number of execution entry points (events)
+            - estimated_tokens: Rough token count estimate
+            - recommendation: Suggested approach (use_full_graph, use_summary_or_filter, etc.)
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name
+            }
+
+            logger.info(f"Checking blueprint complexity for: {blueprint_name}")
+            response = unreal.send_command("check_blueprint_complexity", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Check blueprint complexity response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error checking blueprint complexity: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def get_blueprint_summary(
+        ctx: Context,
+        blueprint_name: str
+    ) -> Dict[str, Any]:
+        """
+        Get a high-level summary of a Blueprint without detailed node information.
+
+        This is much more compact than get_blueprint_event_graph and is ideal for
+        understanding Blueprint structure before diving into details.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - parent_class: Parent class name
+            - component_count: Number of components
+            - variable_count: Number of variables
+            - custom_events: Array of custom event names
+            - custom_functions: Array of custom function names
+            - blueprint_events: Array of standard Blueprint events (ReceiveBeginPlay, etc.)
+            - input_actions: Array of input action event names
+            - complexity: Object with total_nodes, execution_paths, estimated_loc
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name
+            }
+
+            logger.info(f"Getting blueprint summary for: {blueprint_name}")
+            response = unreal.send_command("get_blueprint_summary", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get blueprint summary response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting blueprint summary: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def get_blueprint_function(
+        ctx: Context,
+        blueprint_name: str,
+        function_name: str
+    ) -> Dict[str, Any]:
+        """
+        Get the implementation of a single function or event from a Blueprint.
+
+        This returns only the nodes for the specified function/event, not the entire
+        event graph. Much more efficient for analyzing specific functionality.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint
+            function_name: Name of the function or event to retrieve
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - function_name: Name of the function/event
+            - type: "Function" or "Event"
+            - nodes: Array of node objects (same format as get_blueprint_event_graph)
+            - node_count: Number of nodes in this function
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name,
+                "function_name": function_name
+            }
+
+            logger.info(f"Getting blueprint function {function_name} for: {blueprint_name}")
+            response = unreal.send_command("get_blueprint_function", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get blueprint function response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting blueprint function: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def get_blueprint_pseudocode(
+        ctx: Context,
+        blueprint_name: str
+    ) -> Dict[str, Any]:
+        """
+        Convert a Blueprint's event graph to human-readable pseudocode.
+
+        This is the most compact representation and is ideal for understanding
+        Blueprint logic without getting overwhelmed by node connection details.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - pseudocode: Multi-line string with readable pseudocode
+            - line_count: Number of lines in the pseudocode
+
+        Example pseudocode output:
+            Event ReceiveBeginPlay:
+              - Set bIsActive = True
+              - Call InitializeComponents
+              - Branch on bShouldStart
+                - Call StartBehavior
+
+            Custom Event OnInteractionComplete:
+              - Call EndBehavior
+              - Set bIsActive = False
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name
+            }
+
+            logger.info(f"Getting blueprint pseudocode for: {blueprint_name}")
+            response = unreal.send_command("get_blueprint_pseudocode", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get blueprint pseudocode response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting blueprint pseudocode: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def get_blueprint_interfaces(
+        ctx: Context,
+        blueprint_name: str
+    ) -> Dict[str, Any]:
+        """
+        Get all interfaces implemented by a Blueprint.
+
+        Args:
+            blueprint_name: Name or path of the Blueprint (e.g., "/Game/Hallucination/Puzzles/BP_MyBlueprint")
+
+        Returns:
+            Dict containing:
+            - blueprint: Name of the blueprint
+            - count: Number of interfaces
+            - interfaces: Array of interface info objects with:
+              - name: Interface class name
+              - class_path: Full path to interface class
+              - is_blueprint_interface: Whether this is a Blueprint interface (vs C++)
+              - functions: Array of function info objects with:
+                - name: Function name
+                - is_event: Whether it's a BlueprintEvent
+                - is_callable: Whether it's BlueprintCallable
+                - parameters: Array of parameter info
+                - return_type: Return type (if any)
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name
+            }
+
+            logger.info(f"Getting blueprint interfaces for: {blueprint_name}")
+            response = unreal.send_command("get_blueprint_interfaces", params)
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            logger.info(f"Get blueprint interfaces response: {response}")
+            return response
+
+        except Exception as e:
+            error_msg = f"Error getting blueprint interfaces: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def find_blueprints_by_class(
+        ctx: Context,
+        class_name: str
+    ) -> Dict[str, Any]:
+        """
+        Find all Blueprints that inherit from a given C++ class.
+
+        Searches the Asset Registry for Blueprint assets whose
+        generated class is a child of the specified class. Returns
+        both direct and indirect descendants.
+
+        Args:
+            class_name: Name of the C++ class to search for.
+                Can be:
+                - Short name: "InteractableAssembly"
+                - With prefix: "AInteractableAssembly"
+                - Full path: "/Script/Hallucination.AInteractableAssembly"
+
+        Returns:
+            Dict containing:
+            - class: Resolved class name
+            - count: Number of matching Blueprints
+            - blueprints: Array of objects with:
+              - path: Full asset path
+              - name: Asset name
+              - parent_class: Direct parent class name
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {
+                    "success": False,
+                    "message": "Failed to connect to Unreal Engine"
+                }
+
+            params = {
+                "class_name": class_name
+            }
+
+            logger.info(
+                f"Finding blueprints by class: {class_name}"
+            )
+            response = unreal.send_command(
+                "find_blueprints_by_class", params
+            )
+
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {
+                    "success": False,
+                    "message": "No response from Unreal Engine"
+                }
+
+            logger.info(
+                f"Find blueprints by class response: {response}"
+            )
+            return response
+
+        except Exception as e:
+            error_msg = (
+                f"Error finding blueprints by class: {e}"
+            )
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    logger.info("Blueprint tools registered successfully")
