@@ -273,6 +273,8 @@ from tools.project_tools import register_project_tools
 from tools.umg_tools import register_umg_tools
 from tools.input_tools import register_input_tools
 from tools.sequencer_tools import register_sequencer_tools
+from tools.flow_tools import register_flow_tools
+from tools.level_tools import register_level_tools
 
 # Register tools
 register_editor_tools(mcp)
@@ -282,6 +284,8 @@ register_project_tools(mcp)
 register_umg_tools(mcp)
 register_input_tools(mcp)
 register_sequencer_tools(mcp)
+register_flow_tools(mcp)
+register_level_tools(mcp)
 
 @mcp.prompt()
 def info():
