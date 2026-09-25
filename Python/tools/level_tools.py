@@ -119,7 +119,8 @@ def register_level_tools(mcp: FastMCP):
                           parent_level: Optional[str] = None, location: Optional[List[float]] = None,
                           rotation: Optional[List[float]] = None, scale: Optional[List[float]] = None,
                           flow_identity_tags: Optional[List[str]] = None, root_flow: Optional[str] = None,
-                          properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                          properties: Optional[Dict[str, Any]] = None,
+                          components: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Spawn an actor into a chosen loaded level. Labels must be unique within the level.
 
@@ -136,7 +137,14 @@ def register_level_tools(mcp: FastMCP):
             flow_identity_tags: Identity tags for the actor's FlowComponent; one is added as an instance
                 component if the class has none. Tags must already exist (add_gameplay_tags).
             root_flow: Flow asset for the FlowComponent's RootFlow.
-            properties: Actor properties, as for add_flow_node (text import, applied in order).
+            properties: Actor properties, as for add_flow_node (text import, applied in order). Keys may
+                be dotted paths into structs and owned components, e.g.
+                "StaticMeshComponent0.BodyInstance.bSimulatePhysics" or
+                "ConstraintComp.ConstraintInstance.ProfileInstance.TwistLimit.TwistMotion".
+            components: Instance components to add, as the Details panel's Add does, applied before
+                properties. Each is {"class": "MagneticGearPawlComponent", "name": optional,
+                "properties": {...}}; a name the actor already has edits that component instead of
+                adding one. Scene components attach under the root.
 
         Returns:
             The actor: label, name, class, level, folder, parent, flow_tags, location.
@@ -144,7 +152,8 @@ def register_level_tools(mcp: FastMCP):
         return _send("spawn_level_actor", _without_none({
             "label": label, "level": level, "class": actor_class, "folder": folder, "parent": parent,
             "parent_level": parent_level, "location": location, "rotation": rotation, "scale": scale,
-            "flow_identity_tags": flow_identity_tags, "root_flow": root_flow, "properties": properties}))
+            "flow_identity_tags": flow_identity_tags, "root_flow": root_flow, "properties": properties,
+            "components": components}))
 
     @mcp.tool()
     def set_level_actor(ctx: Context, actor: str, level: str = "", label: Optional[str] = None,
@@ -152,7 +161,8 @@ def register_level_tools(mcp: FastMCP):
                         parent_level: Optional[str] = None, location: Optional[List[float]] = None,
                         rotation: Optional[List[float]] = None, scale: Optional[List[float]] = None,
                         flow_identity_tags: Optional[List[str]] = None, root_flow: Optional[str] = None,
-                        properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        properties: Optional[Dict[str, Any]] = None,
+                        components: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Edit an existing actor. Only the fields given change.
 
@@ -170,7 +180,8 @@ def register_level_tools(mcp: FastMCP):
         return _send("set_level_actor", _without_none({
             "actor": actor, "level": level, "label": label, "folder": folder, "parent": parent,
             "parent_level": parent_level, "location": location, "rotation": rotation, "scale": scale,
-            "flow_identity_tags": flow_identity_tags, "root_flow": root_flow, "properties": properties}))
+            "flow_identity_tags": flow_identity_tags, "root_flow": root_flow, "properties": properties,
+            "components": components}))
 
     @mcp.tool()
     def delete_level_actor(ctx: Context, actor: str, level: str = "") -> Dict[str, Any]:
