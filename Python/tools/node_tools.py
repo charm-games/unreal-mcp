@@ -11,8 +11,113 @@ from mcp.server.fastmcp import FastMCP, Context
 # Get logger
 logger = logging.getLogger("UnrealMCP")
 
+
+def _send(command: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    from unreal_mcp_server import get_unreal_connection
+
+    try:
+        unreal = get_unreal_connection()
+        if not unreal:
+            logger.error("Failed to connect to Unreal Engine")
+            return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+        response = unreal.send_command(command, params)
+        if not response:
+            logger.error("No response from Unreal Engine")
+            return {"success": False, "message": "No response from Unreal Engine"}
+
+        return response
+
+    except Exception as e:
+        error_msg = f"Error in {command}: {e}"
+        logger.error(error_msg)
+        return {"success": False, "message": error_msg}
+
 def register_blueprint_node_tools(mcp: FastMCP):
     """Register Blueprint node manipulation tools with the MCP server."""
+
+    @mcp.tool()
+    def delete_blueprint_nodes(ctx: Context, blueprint_name: str, node_ids: List[str]) -> Dict[str, Any]:
+        """
+        Delete Blueprint graph nodes by GUID (from get_blueprint_event_graph / get_blueprint_function),
+        in any graph of the Blueprint, then compile. All ids are resolved first: nothing is deleted if
+        one is missing or undeletable (function entry/result nodes).
+
+        Args:
+            blueprint_name: Full content path of the Blueprint
+            node_ids: Node GUIDs
+        """
+        return _send("delete_blueprint_nodes", {"blueprint_name": blueprint_name, "node_ids": node_ids})
+
+    @mcp.tool()
+    def add_blueprint_variable_node(
+        ctx: Context,
+        blueprint_name: str,
+        variable_name: str,
+        node_type: str = "get",
+        position: Optional[List[float]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add a Get or Set node for a variable the Blueprint declares or inherits (e.g. a C++ UPROPERTY), in self
+        context, to its event graph. Returns node_id and pin names; wire it with connect_blueprint_nodes.
+        An unconnected struct input on a Set node writes the struct's default (all zero).
+
+        Args:
+            blueprint_name: Full content path of the Blueprint
+            variable_name: Variable (property) name
+            node_type: "get" or "set"
+            position: [X, Y] in the graph
+        """
+        params: Dict[str, Any] = {"blueprint_name": blueprint_name, "variable_name": variable_name,
+                                  "node_type": node_type}
+        if position:
+            params["position"] = position
+        return _send("add_blueprint_variable_node", params)
+
+    @mcp.tool()
+    def disconnect_blueprint_pins(
+        ctx: Context,
+        blueprint_name: str,
+        source_node_id: str,
+        source_pin: str,
+        target_node_id: str,
+        target_pin: str,
+    ) -> Dict[str, Any]:
+        """
+        Break one link between two pins, in any graph of the Blueprint. connect_blueprint_nodes never breaks an
+        existing link, so splicing a node into an exec chain is: disconnect A->B, then connect A->new->B.
+
+        Args:
+            blueprint_name: Full content path of the Blueprint
+            source_node_id: GUID of the node owning the output pin
+            source_pin: Output pin name
+            target_node_id: GUID of the node owning the input pin
+            target_pin: Input pin name
+        """
+        return _send("disconnect_blueprint_pins", {
+            "blueprint_name": blueprint_name, "source_node_id": source_node_id, "source_pin": source_pin,
+            "target_node_id": target_node_id, "target_pin": target_pin})
+
+    @mcp.tool()
+    def add_blueprint_comment(
+        ctx: Context,
+        blueprint_name: str,
+        node_ids: List[str],
+        text: str,
+        padding: float = 30.0,
+    ) -> Dict[str, Any]:
+        """
+        Add a comment box enclosing the given nodes (all in one graph). Node sizes are estimated, since
+        Blueprint nodes are only measured when drawn, so the box may need a nudge in the editor.
+
+        Args:
+            blueprint_name: Full content path of the Blueprint
+            node_ids: GUIDs of the nodes to enclose
+            text: Comment text
+            padding: Space between the nodes and the box edge
+        """
+        return _send("add_blueprint_comment", {"blueprint_name": blueprint_name, "node_ids": node_ids,
+                                               "text": text, "padding": padding})
     
     @mcp.tool()
     def add_blueprint_event_node(

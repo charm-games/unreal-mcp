@@ -120,4 +120,47 @@ def register_sequencer_tools(mcp: FastMCP):
         """
         return _send("save_asset", {"asset_path": asset_path})
 
+    @mcp.tool()
+    def set_string_table_entry(ctx: Context, asset_path: str, key: str, source_string: str,
+                               save: bool = True) -> Dict[str, Any]:
+        """
+        Add a String Table entry, or overwrite an existing entry's source string (Python can't).
+
+        Args:
+            asset_path: String Table path, e.g. "/Game/Hallucination/StringTables/ST_PauseMenu"
+            key: Entry key, e.g. "SettingsLabel_MuteMusic"
+            source_string: The (native culture) source text
+            save: Save the String Table package afterwards
+
+        Returns:
+            Dict with the table id, key, and previous_source_string when the key already existed.
+        """
+        return _send("set_string_table_entry", {"asset_path": asset_path, "key": key,
+                                                "source_string": source_string, "save": save})
+
+    @mcp.tool()
+    def delete_asset(ctx: Context, asset_path: str, force: bool = False) -> Dict[str, Any]:
+        """
+        Delete an asset. Refused, with the referencing packages listed, while anything still references
+        it, unless force is set. Referencers come from the asset registry, which reflects saved state:
+        save assets that dropped their reference before deleting.
+
+        Args:
+            asset_path: Content path, e.g. "/Game/UI/WBP_Old"
+            force: Delete even though other packages reference it (they will have broken references)
+        """
+        return _send("delete_asset", {"asset_path": asset_path, "force": force})
+
+    @mcp.tool()
+    def run_python(ctx: Context, code: str = "", file: str = "") -> Dict[str, Any]:
+        """
+        Run Python in the editor (the `unreal` module) and get back its result and log output - unlike
+        execute_console_command("py ..."), which reports success even when the script raises. Use it for
+        editor work no dedicated tool covers, such as importing textures or editing class defaults.
+        Pass exactly one of code (a script, multiple statements fine) or file (a .py path). Each call
+        runs in a fresh namespace: nothing defined in one call is visible to the next.
+        """
+        params = {"code": code} if code else {"file": file}
+        return _send("run_python", params)
+
     logger.info("Sequencer tools registered successfully")

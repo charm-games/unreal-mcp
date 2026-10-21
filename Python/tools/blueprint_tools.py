@@ -277,7 +277,13 @@ def register_blueprint_tools(mcp: FastMCP):
         ctx: Context,
         blueprint_name: str
     ) -> Dict[str, Any]:
-        """Compile a Blueprint."""
+        """
+        Fully compile a Blueprint, as the editor's Compile button does. Use it to check a Blueprint after
+        changing it or the C++ it calls.
+
+        Returns compile_status ("ok", "warnings" or "error") and, when it isn't ok, compile_messages
+        with the compiler's warnings and errors.
+        """
         from unreal_mcp_server import get_unreal_connection
         
         try:
@@ -302,6 +308,44 @@ def register_blueprint_tools(mcp: FastMCP):
             
         except Exception as e:
             error_msg = f"Error compiling blueprint: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def list_failed_blueprints(
+        ctx: Context,
+        include_warnings: bool = False,
+        recompile: bool = True
+    ) -> Dict[str, Any]:
+        """
+        List every loaded Blueprint whose last compile failed - the ones behind Play's "Blueprint failed
+        to compile" warning. Run it after Blueprint edits, or when a user reports that warning.
+
+        Args:
+            include_warnings: Also list Blueprints that compiled with warnings.
+            recompile: Compile each one again and report compile_status / compile_messages, so the list
+                shows what is still broken rather than a stale status.
+
+        Returns:
+            count and blueprints: each with path, status, blocks_play (Play will warn about it) and
+            stale_copy. A stale copy is the <Name>_DEADPACKAGE_N leftover of a package reload: it is not
+            recompiled, and clears once garbage collected (unreal.SystemLibrary.collect_garbage() runs at
+            the end of the frame, so check from a later call). If it survives, something still references
+            it - find what with execute_console_command("obj refs name=<path>") and read the editor log.
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            params = {"include_warnings": include_warnings, "recompile": recompile}
+            response = unreal.send_command("list_failed_blueprints", params)
+            if not response:
+                return {"success": False, "message": "No response from Unreal Engine"}
+            return response
+        except Exception as e:
+            error_msg = f"Error listing failed blueprints: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 

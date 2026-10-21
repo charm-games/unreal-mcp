@@ -189,6 +189,21 @@ def register_level_tools(mcp: FastMCP):
         return _send("delete_level_actor", {"actor": actor, "level": level})
 
     @mcp.tool()
+    def replace_level_actors(ctx: Context, actors: List[str], asset: str, level: str = "") -> Dict[str, Any]:
+        """
+        Replace placed actors with instances of an asset, as the editor's Replace Selected Actors does:
+        a Blueprint deriving from an actor's class takes over its properties (component edits included),
+        attachments are restored, and references to the old actors across their levels are re-pointed.
+        Labels and folders are kept. Undoable.
+
+        Args:
+            actors: Labels or object names of the actors to replace.
+            asset: The Blueprint (or other placeable asset) to replace them with, e.g. "/Game/.../BP_Name".
+            level: Level to look in, to disambiguate labels that repeat across sublevels.
+        """
+        return _send("replace_level_actors", {"actors": actors, "asset": asset, "level": level})
+
+    @mcp.tool()
     def add_gameplay_tags(ctx: Context, tags: List[str], comment: str = "") -> Dict[str, Any]:
         """
         Add gameplay tags to Config/DefaultGameplayTags.ini, usable immediately without a restart.

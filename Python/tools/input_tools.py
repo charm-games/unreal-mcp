@@ -17,6 +17,34 @@ def register_input_tools(mcp: FastMCP):
     """Register input and asset inspection tools."""
 
     @mcp.tool()
+    def set_imc_mapping_action(
+        ctx: Context,
+        asset_path: str,
+        from_action: str,
+        to_action: str,
+        key: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Point Input Mapping Context key mappings at a different Input Action, keeping each mapping's
+        triggers and modifiers. Leaves the IMC unsaved: follow with save_asset.
+
+        Args:
+            asset_path: IMC content path, e.g. "/Game/Input/IMC_Base"
+            from_action: Current action, by name ("IA_MouseLook") or path
+            to_action: Full content path of the new action, e.g. "/Game/Input/Actions/IA_Look"
+            key: Only the mapping on this key ("Mouse2D"); empty moves every mapping of from_action
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        unreal = get_unreal_connection()
+        if not unreal:
+            return {"success": False, "message": "Failed to connect to Unreal Engine"}
+        response = unreal.send_command("set_imc_mapping_action", {
+            "asset_path": asset_path, "from_action": from_action, "to_action": to_action, "key": key,
+        })
+        return response or {"success": False, "message": "No response from Unreal Engine"}
+
+    @mcp.tool()
     def get_active_input_contexts(
         ctx: Context,
     ) -> Dict[str, Any]:

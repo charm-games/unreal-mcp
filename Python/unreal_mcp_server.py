@@ -5,6 +5,7 @@ A simple MCP server for interacting with Unreal Engine.
 """
 
 import logging
+import os
 import socket
 import sys
 import json
@@ -25,7 +26,14 @@ logger = logging.getLogger("UnrealMCP")
 
 # Configuration
 UNREAL_HOST = "127.0.0.1"
-UNREAL_PORT = 55557
+# Each checkout's editor listens on its own port (an agent worktree's local-scope MCP config sets
+# UNREAL_MCP_PORT), so an agent never drives another checkout's editor.
+UNREAL_PORT = int(os.environ.get("UNREAL_MCP_PORT", "55557"))
+
+# Connecting fails fast when the editor isn't running. Commands run on the editor's game thread, so a slow one
+# (a first high-res screenshot, a Blueprint compile, a busy PIE frame) can take well over 5s to answer.
+CONNECT_TIMEOUT_SECONDS = 5
+RESPONSE_TIMEOUT_SECONDS = 30
 
 class UnrealConnection:
     """Connection to an Unreal Engine instance."""
@@ -48,7 +56,7 @@ class UnrealConnection:
             
             logger.info(f"Connecting to Unreal at {UNREAL_HOST}:{UNREAL_PORT}...")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(5)  # 5 second timeout
+            self.socket.settimeout(CONNECT_TIMEOUT_SECONDS)
             
             # Set socket options for better stability
             self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -78,51 +86,39 @@ class UnrealConnection:
         self.socket = None
         self.connected = False
 
-    def receive_full_response(self, sock, buffer_size=4096) -> bytes:
-        """Receive a complete response from Unreal, handling chunked data."""
-        chunks = []
-        sock.settimeout(5)  # 5 second timeout
+    def receive_full_response(self, sock, buffer_size=65536) -> bytes:
+        """Receive one complete JSON response from Unreal, which may arrive over several reads.
+
+        Responses carry no delimiter, so completeness is a successful parse of everything received so far.
+        Parse the raw bytes rather than decoding each read: a read can end partway through a multi-byte UTF-8
+        character, which fails to decode until the rest arrives (UnicodeDecodeError is a ValueError, like
+        JSONDecodeError, so both mean "keep reading").
+        """
+        data = b''
+        sock.settimeout(RESPONSE_TIMEOUT_SECONDS)
         try:
             while True:
                 chunk = sock.recv(buffer_size)
                 if not chunk:
-                    if not chunks:
-                        raise Exception("Connection closed before receiving data")
-                    break
-                chunks.append(chunk)
-                
-                # Process the data received so far
-                data = b''.join(chunks)
-                decoded_data = data.decode('utf-8')
-                
-                # Try to parse as JSON to check if complete
+                    raise Exception("Connection closed before a complete response arrived"
+                                    f" ({len(data)} bytes received)")
+                data += chunk
                 try:
-                    json.loads(decoded_data)
-                    logger.info(f"Received complete response ({len(data)} bytes)")
-                    return data
-                except json.JSONDecodeError:
-                    # Not complete JSON yet, continue reading
-                    logger.debug(f"Received partial response, waiting for more data...")
+                    json.loads(data)
+                except ValueError:
                     continue
-                except Exception as e:
-                    logger.warning(f"Error processing response chunk: {str(e)}")
-                    continue
+                logger.info(f"Received complete response ({len(data)} bytes)")
+                return data
         except socket.timeout:
-            logger.warning("Socket timeout during receive")
-            if chunks:
-                # If we have some data already, try to use it
-                data = b''.join(chunks)
-                try:
-                    json.loads(data.decode('utf-8'))
-                    logger.info(f"Using partial response after timeout ({len(data)} bytes)")
-                    return data
-                except:
-                    pass
-            raise Exception("Timeout receiving Unreal response")
+            logger.warning(f"Socket timeout during receive ({len(data)} bytes received)")
+            # The usual cause is a modal dialog in the editor (overwrite/save prompts, message boxes) blocking the
+            # game thread. MattUtilScripts/Dismiss-UnrealDialog.ps1 -List finds and screenshots it.
+            raise Exception("Timeout receiving Unreal response. If the editor is otherwise idle, a modal dialog is "
+                            "probably blocking it: run C:/repos/MattUtilScripts/Dismiss-UnrealDialog.ps1 -List")
         except Exception as e:
             logger.error(f"Error during receive: {str(e)}")
             raise
-    
+
     def send_command(self, command: str, params: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         """Send a command to Unreal Engine and get the response."""
         # Always reconnect for each command, since Unreal closes the connection after each command
@@ -275,6 +271,7 @@ from tools.input_tools import register_input_tools
 from tools.sequencer_tools import register_sequencer_tools
 from tools.flow_tools import register_flow_tools
 from tools.level_tools import register_level_tools
+from tools.pie_tools import register_pie_tools
 
 # Register tools
 register_editor_tools(mcp)
@@ -286,6 +283,7 @@ register_input_tools(mcp)
 register_sequencer_tools(mcp)
 register_flow_tools(mcp)
 register_level_tools(mcp)
+register_pie_tools(mcp)
 
 @mcp.prompt()
 def info():
